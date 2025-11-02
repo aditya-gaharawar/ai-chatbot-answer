@@ -497,6 +497,26 @@ SCIM_ENABLED = os.environ.get("SCIM_ENABLED", "False").lower() == "true"
 SCIM_TOKEN = os.environ.get("SCIM_TOKEN", "")
 
 ####################################
+# Email Verification Configuration
+####################################
+
+ENABLE_EMAIL_VERIFICATION = (
+    os.environ.get("ENABLE_EMAIL_VERIFICATION", "False").lower() == "true"
+)
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = os.environ.get("SMTP_PORT", "587")
+try:
+    SMTP_PORT = int(SMTP_PORT)
+except ValueError:
+    SMTP_PORT = 587
+
+SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", "")
+SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "True").lower() == "true"
+
+####################################
 # LICENSE_KEY
 ####################################
 

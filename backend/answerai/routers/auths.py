@@ -51,6 +51,7 @@ from answerai.utils.auth import (
 )
 from answerai.utils.webhook import post_webhook
 from answerai.utils.access_control import get_permissions
+from answerai.utils.email import generate_verification_token, send_verification_email
 
 from typing import Optional, List
 
@@ -372,6 +373,7 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
                         password=str(uuid.uuid4()),
                         name=cn,
                         role=role,
+                        email_verified=True,  # LDAP users have verified emails
                     )
 
                     if not user:
@@ -590,7 +592,20 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
     try:
-        role = "admin" if not has_users else request.app.state.config.DEFAULT_USER_ROLE
+        # Check if email verification is enabled
+        email_verification_enabled = (
+            request.app.state.config.ENABLE_EMAIL_VERIFICATION_CONFIG.value
+            if hasattr(request.app.state.config, "ENABLE_EMAIL_VERIFICATION_CONFIG")
+            else False
+        )
+
+        # Determine user role
+        if not has_users:
+            role = "admin"
+        elif email_verification_enabled:
+            role = "pending"  # Set to pending if email verification is enabled
+        else:
+            role = request.app.state.config.DEFAULT_USER_ROLE
 
         # The password passed to bcrypt must be 72 bytes or fewer. If it is longer, it will be truncated before hashing.
         if len(form_data.password.encode("utf-8")) > 72:
@@ -609,6 +624,53 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         )
 
         if user:
+            # If email verification is enabled and this is not the first user (admin)
+            if email_verification_enabled and has_users:
+                # Generate verification token
+                verification_token = generate_verification_token()
+
+                # Save token to database
+                Users.update_user_email_verification_token_by_id(
+                    user.id, verification_token
+                )
+
+                # Get base URL from request
+                base_url = str(request.base_url).rstrip("/")
+
+                # Send verification email
+                email_sent = send_verification_email(
+                    email=user.email,
+                    token=verification_token,
+                    smtp_host=request.app.state.config.SMTP_HOST_CONFIG.value,
+                    smtp_port=request.app.state.config.SMTP_PORT_CONFIG.value,
+                    smtp_username=request.app.state.config.SMTP_USERNAME_CONFIG.value,
+                    smtp_password=request.app.state.config.SMTP_PASSWORD_CONFIG.value,
+                    smtp_from_email=request.app.state.config.SMTP_FROM_EMAIL_CONFIG.value,
+                    smtp_use_tls=request.app.state.config.SMTP_USE_TLS_CONFIG.value,
+                    base_url=base_url,
+                )
+
+                if not email_sent:
+                    log.warning(
+                        f"Failed to send verification email to {user.email}, but user was created"
+                    )
+
+                # Return response indicating verification email was sent
+                # Don't issue JWT token yet
+                return {
+                    "token": None,
+                    "token_type": "Bearer",
+                    "expires_at": None,
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "role": user.role,
+                    "profile_image_url": user.profile_image_url,
+                    "permissions": {},
+                    "email_verification_required": True,
+                }
+
+            # Normal signup flow (no email verification or first user)
             expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
             expires_at = None
             if expires_delta:
@@ -671,6 +733,191 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
     except Exception as err:
         log.error(f"Signup error: {str(err)}")
         raise HTTPException(500, detail="An internal error occurred during signup.")
+
+
+class VerifyEmailForm(BaseModel):
+    token: str
+
+
+@router.post("/verify-email", response_model=SessionUserResponse)
+async def verify_email(
+    request: Request, response: Response, form_data: VerifyEmailForm
+):
+    """
+    Verify user email with the provided token and issue JWT token.
+    """
+    try:
+        # Find user by verification token
+        user = Users.get_user_by_email_verification_token(form_data.token)
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired verification token",
+            )
+
+        # Check if email is already verified
+        if user.email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already verified",
+            )
+
+        # Verify the email and clear the token
+        user = Users.verify_user_email_by_id(user.id)
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to verify email",
+            )
+
+        # Update user role from "pending" to default user role
+        default_role = request.app.state.config.DEFAULT_USER_ROLE
+        if user.role == "pending":
+            Users.update_user_role_by_id(user.id, default_role)
+            user.role = default_role
+
+        # Issue JWT token for immediate login
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+        token = create_token(
+            data={"id": user.id},
+            expires_delta=expires_delta,
+        )
+
+        datetime_expires_at = (
+            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+            if expires_at
+            else None
+        )
+
+        # Set the cookie token
+        response.set_cookie(
+            key="token",
+            value=token,
+            expires=datetime_expires_at,
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
+
+        # Send webhook notification
+        if request.app.state.config.WEBHOOK_URL:
+            await post_webhook(
+                request.app.state.ANSWERAI_NAME,
+                request.app.state.config.WEBHOOK_URL,
+                WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
+                {
+                    "action": "email_verified",
+                    "message": f"{user.name} verified their email",
+                    "user": user.model_dump_json(exclude_none=True),
+                },
+            )
+
+        user_permissions = get_permissions(
+            user.id, request.app.state.config.USER_PERMISSIONS
+        )
+
+        return {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_at": expires_at,
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "profile_image_url": user.profile_image_url,
+            "permissions": user_permissions,
+        }
+    except HTTPException:
+        raise
+    except Exception as err:
+        log.error(f"Email verification error: {str(err)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during email verification",
+        )
+
+
+class ResendVerificationForm(BaseModel):
+    email: str
+
+
+@router.post("/resend-verification")
+async def resend_verification(request: Request, form_data: ResendVerificationForm):
+    """
+    Resend verification email to the user.
+    """
+    try:
+        # Find user by email
+        user = Users.get_user_by_email(form_data.email.lower())
+
+        if not user:
+            # Don't reveal if email exists or not for security
+            return {"message": "If the email exists and is not verified, a verification email will be sent"}
+
+        # Check if email is already verified
+        if user.email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already verified",
+            )
+
+        # Check if email verification is enabled
+        email_verification_enabled = (
+            request.app.state.config.ENABLE_EMAIL_VERIFICATION_CONFIG.value
+            if hasattr(request.app.state.config, "ENABLE_EMAIL_VERIFICATION_CONFIG")
+            else False
+        )
+
+        if not email_verification_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email verification is not enabled",
+            )
+
+        # Generate new verification token
+        verification_token = generate_verification_token()
+
+        # Save token to database
+        Users.update_user_email_verification_token_by_id(user.id, verification_token)
+
+        # Get base URL from request
+        base_url = str(request.base_url).rstrip("/")
+
+        # Send verification email
+        email_sent = send_verification_email(
+            email=user.email,
+            token=verification_token,
+            smtp_host=request.app.state.config.SMTP_HOST_CONFIG.value,
+            smtp_port=request.app.state.config.SMTP_PORT_CONFIG.value,
+            smtp_username=request.app.state.config.SMTP_USERNAME_CONFIG.value,
+            smtp_password=request.app.state.config.SMTP_PASSWORD_CONFIG.value,
+            smtp_from_email=request.app.state.config.SMTP_FROM_EMAIL_CONFIG.value,
+            smtp_use_tls=request.app.state.config.SMTP_USE_TLS_CONFIG.value,
+            base_url=base_url,
+        )
+
+        if not email_sent:
+            log.error(f"Failed to resend verification email to {user.email}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification email. Please check SMTP configuration.",
+            )
+
+        return {"message": "Verification email sent successfully"}
+    except HTTPException:
+        raise
+    except Exception as err:
+        log.error(f"Resend verification error: {str(err)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while resending verification email",
+        )
 
 
 @router.get("/signout")

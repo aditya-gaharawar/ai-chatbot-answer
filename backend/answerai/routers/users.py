@@ -501,6 +501,51 @@ async def update_user_by_id(
 
 
 ############################
+# VerifyUserEmailById (Admin)
+############################
+
+
+@router.post("/{user_id}/verify-email", response_model=Optional[UserModel])
+async def verify_user_email_by_id(
+    user_id: str, session_user=Depends(get_admin_user)
+):
+    """
+    Admin endpoint to manually verify a user's email.
+    """
+    user = Users.get_user_by_id(user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified",
+        )
+
+    # Verify the email and clear the token
+    verified_user = Users.verify_user_email_by_id(user_id)
+
+    if not verified_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify email",
+        )
+
+    # Update user role from "pending" to default user role if needed
+    if verified_user.role == "pending":
+        from answerai.config import DEFAULT_USER_ROLE
+
+        Users.update_user_role_by_id(user_id, DEFAULT_USER_ROLE.value)
+        verified_user.role = DEFAULT_USER_ROLE.value
+
+    return verified_user
+
+
+############################
 # DeleteUserById
 ############################
 
