@@ -30,6 +30,13 @@ from answerai.env import (
     WEBUI_AUTH,
     WEBUI_FAVICON_URL,
     ANSWERAI_NAME,
+    ENABLE_EMAIL_VERIFICATION,
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USERNAME,
+    SMTP_PASSWORD,
+    SMTP_FROM_EMAIL,
+    SMTP_USE_TLS,
     log,
 )
 from answerai.internal.db import Base, get_db
@@ -1113,6 +1120,52 @@ ENABLE_LOGIN_FORM = PersistentConfig(
     "ENABLE_LOGIN_FORM",
     "ui.ENABLE_LOGIN_FORM",
     os.environ.get("ENABLE_LOGIN_FORM", "True").lower() == "true",
+)
+
+####################################
+# Email Verification Configuration
+####################################
+
+ENABLE_EMAIL_VERIFICATION_CONFIG = PersistentConfig(
+    "ENABLE_EMAIL_VERIFICATION",
+    "auth.enable_email_verification",
+    ENABLE_EMAIL_VERIFICATION,
+)
+
+SMTP_HOST_CONFIG = PersistentConfig(
+    "SMTP_HOST",
+    "auth.smtp_host",
+    SMTP_HOST,
+)
+
+SMTP_PORT_CONFIG = PersistentConfig(
+    "SMTP_PORT",
+    "auth.smtp_port",
+    SMTP_PORT,
+)
+
+SMTP_USERNAME_CONFIG = PersistentConfig(
+    "SMTP_USERNAME",
+    "auth.smtp_username",
+    SMTP_USERNAME,
+)
+
+SMTP_PASSWORD_CONFIG = PersistentConfig(
+    "SMTP_PASSWORD",
+    "auth.smtp_password",
+    SMTP_PASSWORD,
+)
+
+SMTP_FROM_EMAIL_CONFIG = PersistentConfig(
+    "SMTP_FROM_EMAIL",
+    "auth.smtp_from_email",
+    SMTP_FROM_EMAIL,
+)
+
+SMTP_USE_TLS_CONFIG = PersistentConfig(
+    "SMTP_USE_TLS",
+    "auth.smtp_use_tls",
+    SMTP_USE_TLS,
 )
 
 

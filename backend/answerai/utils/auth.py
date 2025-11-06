@@ -358,6 +358,32 @@ def get_verified_user(user=Depends(get_current_user)):
     return user
 
 
+def get_email_verified_user(user=Depends(get_current_user)):
+    """
+    Get current user and check if email is verified (when email verification is enabled).
+    This function should be used in endpoints that require email verification.
+    """
+    # Import here to avoid circular dependency
+    from answerai.env import ENABLE_EMAIL_VERIFICATION
+
+    if user.role not in {"user", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Check email verification if it's enabled
+    if ENABLE_EMAIL_VERIFICATION and not user.email_verified:
+        # Allow admin users to bypass email verification
+        if user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email verification required. Please verify your email to access this resource.",
+            )
+
+    return user
+
+
 def get_admin_user(user=Depends(get_current_user)):
     if user.role != "admin":
         raise HTTPException(

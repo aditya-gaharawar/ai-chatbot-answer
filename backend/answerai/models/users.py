@@ -11,7 +11,7 @@ from answerai.utils.misc import throttle
 
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, String, Text, Date
+from sqlalchemy import BigInteger, Column, String, Text, Date, Boolean
 from sqlalchemy import or_
 
 import datetime
@@ -42,6 +42,9 @@ class User(Base):
 
     api_key = Column(String, nullable=True, unique=True)
     oauth_sub = Column(Text, unique=True)
+
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verification_token = Column(String, nullable=True)
 
     last_active_at = Column(BigInteger)
 
@@ -74,6 +77,9 @@ class UserModel(BaseModel):
 
     api_key: Optional[str] = None
     oauth_sub: Optional[str] = None
+
+    email_verified: bool = False
+    email_verification_token: Optional[str] = None
 
     last_active_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
@@ -159,6 +165,7 @@ class UsersTable:
         profile_image_url: str = "/user.png",
         role: str = "pending",
         oauth_sub: Optional[str] = None,
+        email_verified: bool = False,
     ) -> Optional[UserModel]:
         with get_db() as db:
             user = UserModel(
@@ -172,6 +179,7 @@ class UsersTable:
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                     "oauth_sub": oauth_sub,
+                    "email_verified": email_verified,
                 }
             )
             result = User(**user.model_dump())
@@ -453,6 +461,44 @@ class UsersTable:
                 return UserModel.model_validate(user)
             else:
                 return None
+
+    def update_user_email_verification_token_by_id(
+        self, id: str, token: str
+    ) -> Optional[UserModel]:
+        try:
+            with get_db() as db:
+                db.query(User).filter_by(id=id).update(
+                    {"email_verification_token": token}
+                )
+                db.commit()
+
+                user = db.query(User).filter_by(id=id).first()
+                return UserModel.model_validate(user)
+        except Exception:
+            return None
+
+    def get_user_by_email_verification_token(
+        self, token: str
+    ) -> Optional[UserModel]:
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(email_verification_token=token).first()
+                return UserModel.model_validate(user) if user else None
+        except Exception:
+            return None
+
+    def verify_user_email_by_id(self, id: str) -> Optional[UserModel]:
+        try:
+            with get_db() as db:
+                db.query(User).filter_by(id=id).update(
+                    {"email_verified": True, "email_verification_token": None}
+                )
+                db.commit()
+
+                user = db.query(User).filter_by(id=id).first()
+                return UserModel.model_validate(user)
+        except Exception:
+            return None
 
 
 Users = UsersTable()

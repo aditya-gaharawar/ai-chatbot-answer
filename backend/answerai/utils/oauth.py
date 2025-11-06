@@ -1265,6 +1265,7 @@ class OAuthManager:
                         profile_image_url=picture_url,
                         role=self.get_user_role(None, user_data),
                         oauth_sub=provider_sub,
+                        email_verified=True,  # OAuth users have verified emails
                     )
 
                     if auth_manager_config.WEBHOOK_URL:
