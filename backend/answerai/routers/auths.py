@@ -621,6 +621,7 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             form_data.name,
             form_data.profile_image_url,
             role,
+            email_verified=(not has_users),  # First admin is auto-verified
         )
 
         if user:
@@ -656,11 +657,11 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
                     )
 
                 # Return response indicating verification email was sent
-                # Don't issue JWT token yet
+                # Don't issue JWT token yet - return empty string to satisfy response model
                 return {
-                    "token": None,
+                    "token": "",
                     "token_type": "Bearer",
-                    "expires_at": None,
+                    "expires_at": 0,
                     "id": user.id,
                     "email": user.email,
                     "name": user.name,

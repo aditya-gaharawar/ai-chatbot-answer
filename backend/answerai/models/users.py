@@ -43,7 +43,7 @@ class User(Base):
     api_key = Column(String, nullable=True, unique=True)
     oauth_sub = Column(Text, unique=True)
 
-    email_verified = Column(Boolean, default=False)
+    email_verified = Column(Boolean, default=False, nullable=False)
     email_verification_token = Column(String, nullable=True)
 
     last_active_at = Column(BigInteger)
