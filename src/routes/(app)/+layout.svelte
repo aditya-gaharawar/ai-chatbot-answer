@@ -47,6 +47,8 @@
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import SurpriseButton from '$lib/components/common/SurpriseButton.svelte';
+	import KonamiCode from '$lib/components/common/KonamiCode.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -400,6 +402,16 @@
 				{/if}
 			{/if}
 		</div>
+
+		<!-- Floating Surprise Button -->
+		{#if loaded && $user}
+			<div class="fixed bottom-6 right-6 z-40">
+				<SurpriseButton token={localStorage.token} />
+			</div>
+		{/if}
+
+		<!-- Konami Code Easter Egg -->
+		<KonamiCode />
 	</div>
 {/if}
 
